@@ -12,7 +12,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-const SCREENWEAVE_PLATFORM_VERSION = '1.0.0';
+const SCREENWEAVE_PLATFORM_VERSION = '1.1.0';
 const SCREENWEAVE_PLATFORM_NAME = 'screenweave-wordpress';
 
 /**
@@ -29,6 +29,24 @@ function screenweave_env_bool(string $key, bool $default = false): bool
     return in_array(strtolower((string) $value), ['1', 'true', 'yes', 'on'], true);
 }
 
+function screenweave_env_string(string $key, string $default = ''): string
+{
+    $value = getenv($key);
+
+    if ($value === false) {
+        return $default;
+    }
+
+    return trim((string) $value);
+}
+
+function screenweave_is_non_production_or_holding(): bool
+{
+    $environment = function_exists('wp_get_environment_type') ? wp_get_environment_type() : 'production';
+
+    return $environment !== 'production' || screenweave_env_bool('WORDPRESS_IS_HOLDING_URL', false);
+}
+
 /**
  * Disable the built-in code editors. This is safe for all environments.
  */
@@ -37,6 +55,26 @@ add_action('init', static function (): void {
         define('DISALLOW_FILE_EDIT', true);
     }
 });
+
+/**
+ * Auto-activate image-managed platform plugins when present.
+ */
+add_action('init', static function (): void {
+    if (!function_exists('activate_plugin')) {
+        require_once ABSPATH . 'wp-admin/includes/plugin.php';
+    }
+
+    $plugins = array_filter(array_map('trim', explode(',', screenweave_env_string(
+        'SCREENWEAVE_AUTO_ACTIVATE_PLUGINS',
+        'redis-cache/redis-cache.php,fluent-smtp/fluent-smtp.php'
+    ))));
+
+    foreach ($plugins as $plugin) {
+        if (file_exists(WP_PLUGIN_DIR . '/' . $plugin) && !is_plugin_active($plugin)) {
+            activate_plugin($plugin, '', false, true);
+        }
+    }
+}, 20);
 
 /**
  * Optionally disable XML-RPC. Enabled by default for the ScreenWeave platform.
@@ -67,6 +105,52 @@ add_action('send_headers', static function (): void {
     header('X-Frame-Options: SAMEORIGIN');
     header('Referrer-Policy: strict-origin-when-cross-origin');
     header('Permissions-Policy: camera=(), microphone=(), geolocation=()');
+
+    if (screenweave_is_non_production_or_holding()) {
+        header('X-Robots-Tag: noindex, nofollow, noarchive');
+    }
+});
+
+add_filter('robots_txt', static function (string $output, bool $public): string {
+    if (!screenweave_is_non_production_or_holding()) {
+        return $output;
+    }
+
+    return "User-agent: *\nDisallow: /\n";
+}, 10, 2);
+
+add_filter('pre_option_blog_public', static function ($preOption) {
+    return screenweave_is_non_production_or_holding() ? '0' : $preOption;
+});
+
+/**
+ * Generic env-driven SMTP fallback. FluentSMTP is still installed for UI/logging,
+ * but this guarantees mail can work from environment variables alone.
+ */
+add_action('phpmailer_init', static function ($phpmailer): void {
+    $host = screenweave_env_string('WP_SMTP_HOST');
+
+    if ($host === '') {
+        return;
+    }
+
+    $phpmailer->isSMTP();
+    $phpmailer->Host = $host;
+    $phpmailer->Port = (int) (screenweave_env_string('WP_SMTP_PORT', '587'));
+    $phpmailer->SMTPAuth = screenweave_env_bool('WP_SMTP_AUTH', true);
+    $phpmailer->Username = screenweave_env_string('WP_SMTP_USER');
+    $phpmailer->Password = screenweave_env_string('WP_SMTP_PASSWORD');
+    $phpmailer->SMTPSecure = screenweave_env_string('WP_SMTP_SECURE', 'tls');
+
+    $from = screenweave_env_string('WP_SMTP_FROM');
+    if ($from !== '') {
+        $phpmailer->From = $from;
+    }
+
+    $fromName = screenweave_env_string('WP_SMTP_FROM_NAME');
+    if ($fromName !== '') {
+        $phpmailer->FromName = $fromName;
+    }
 });
 
 /**
@@ -118,6 +202,8 @@ function screenweave_health_check(): WP_REST_Response
         'isHoldingUrl' => screenweave_env_bool('WORDPRESS_IS_HOLDING_URL', false),
         'db' => $dbStatus,
         'objectCache' => $cacheStatus,
+        'noindex' => screenweave_is_non_production_or_holding(),
+        'smtpConfigured' => screenweave_env_string('WP_SMTP_HOST') !== '',
         'timestamp' => gmdate('c'),
     ];
 
