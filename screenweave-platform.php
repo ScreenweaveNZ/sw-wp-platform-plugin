@@ -2,7 +2,7 @@
 /**
  * Plugin Name: ScreenWeave Platform
  * Description: ScreenWeave WordPress platform defaults, health checks, and security hardening.
- * Version: 1.0.0
+ * Version: 1.2.0
  * Author: ScreenWeave
  */
 
@@ -12,7 +12,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-const SCREENWEAVE_PLATFORM_VERSION = '1.1.0';
+const SCREENWEAVE_PLATFORM_VERSION = '1.2.0';
 const SCREENWEAVE_PLATFORM_NAME = 'screenweave-wordpress';
 
 /**
@@ -191,19 +191,33 @@ function screenweave_health_check(): WP_REST_Response
         $cacheStatus = wp_using_ext_object_cache() ? 'enabled' : 'configured-but-not-enabled';
     }
 
+    $mediaBucket = screenweave_env_string('S3_UPLOADS_BUCKET');
+    $mediaEndpoint = screenweave_env_string('S3_UPLOADS_ENDPOINT_URL');
+    $mediaBucketUrl = screenweave_env_string('S3_UPLOADS_BUCKET_URL');
+
     $payload = [
         'status' => $statusCode === 200 ? 'ok' : 'degraded',
         'platform' => SCREENWEAVE_PLATFORM_NAME,
         'platformVersion' => SCREENWEAVE_PLATFORM_VERSION,
-        'wordpressVersion' => get_bloginfo('version'),
         'environment' => function_exists('wp_get_environment_type') ? wp_get_environment_type() : 'unknown',
         'siteUrl' => home_url(),
         'holdingUrl' => getenv('WORDPRESS_HOLDING_URL') ?: null,
         'isHoldingUrl' => screenweave_env_bool('WORDPRESS_IS_HOLDING_URL', false),
         'db' => $dbStatus,
         'objectCache' => $cacheStatus,
+        'objectCacheInUse' => wp_using_ext_object_cache(),
+        'redisClient' => defined('WP_REDIS_CLIENT') ? (string) WP_REDIS_CLIENT : null,
+        'phpRedisLoaded' => extension_loaded('redis'),
         'noindex' => screenweave_is_non_production_or_holding(),
         'smtpConfigured' => screenweave_env_string('WP_SMTP_HOST') !== '',
+        'cronDisabled' => defined('DISABLE_WP_CRON') && DISABLE_WP_CRON,
+        'fileEditDisabled' => defined('DISALLOW_FILE_EDIT') && DISALLOW_FILE_EDIT,
+        'fileModsDisabled' => defined('DISALLOW_FILE_MODS') && DISALLOW_FILE_MODS,
+        'mediaStorage' => $mediaBucket !== '' ? 's3-compatible' : 'local',
+        'mediaOffloadConfigured' => $mediaBucket !== '',
+        'mediaBucket' => $mediaBucket !== '' ? $mediaBucket : null,
+        'mediaEndpointHost' => $mediaEndpoint !== '' ? wp_parse_url($mediaEndpoint, PHP_URL_HOST) : null,
+        'mediaBucketUrlHost' => $mediaBucketUrl !== '' ? wp_parse_url($mediaBucketUrl, PHP_URL_HOST) : null,
         'timestamp' => gmdate('c'),
     ];
 
