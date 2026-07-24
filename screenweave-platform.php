@@ -2,7 +2,7 @@
 /**
  * Plugin Name: ScreenWeave Platform
  * Description: ScreenWeave WordPress platform defaults, health checks, and security hardening.
- * Version: 1.3.0
+ * Version: 1.4.0
  * Author: ScreenWeave
  */
 
@@ -12,7 +12,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-const SCREENWEAVE_PLATFORM_VERSION = '1.3.0';
+const SCREENWEAVE_PLATFORM_VERSION = '1.4.0';
 const SCREENWEAVE_PLATFORM_NAME = 'screenweave-wordpress';
 
 /**
@@ -103,6 +103,32 @@ function screenweave_media_domain(string $provider): string
     }
 
     return '';
+}
+
+function screenweave_standard_plugin_status(): array
+{
+    if (!function_exists('is_plugin_active')) {
+        require_once ABSPATH . 'wp-admin/includes/plugin.php';
+    }
+
+    $plugins = [
+        'redisObjectCache' => 'redis-cache/redis-cache.php',
+        'fluentSmtp' => 'fluent-smtp/fluent-smtp.php',
+        'advancedMediaOffloader' => 'advanced-media-offloader/advanced-media-offloader.php',
+        'rankMath' => 'seo-by-rank-math/rank-math.php',
+        'cacheEnabler' => 'cache-enabler/cache-enabler.php',
+        'modernImageFormats' => 'webp-uploads/load.php',
+        'imagePrioritizer' => 'image-prioritizer/load.php',
+        'speculativeLoading' => 'speculation-rules/load.php',
+    ];
+
+    $status = [];
+
+    foreach ($plugins as $key => $pluginFile) {
+        $status[$key] = is_plugin_active($pluginFile);
+    }
+
+    return $status;
 }
 
 /**
@@ -276,11 +302,8 @@ function screenweave_health_check(): WP_REST_Response
     $mediaEndpoint = screenweave_media_endpoint($mediaProvider);
     $mediaBucketUrl = screenweave_media_domain($mediaProvider);
 
-    if (!function_exists('is_plugin_active')) {
-        require_once ABSPATH . 'wp-admin/includes/plugin.php';
-    }
-
-    $mediaPluginActive = is_plugin_active('advanced-media-offloader/advanced-media-offloader.php');
+    $standardPlugins = screenweave_standard_plugin_status();
+    $mediaPluginActive = $standardPlugins['advancedMediaOffloader'] ?? false;
 
     $payload = [
         'status' => $statusCode === 200 ? 'ok' : 'degraded',
@@ -304,6 +327,7 @@ function screenweave_health_check(): WP_REST_Response
         'mediaOffloadConfigured' => $mediaBucket !== '',
         'mediaOffloadPlugin' => 'advanced-media-offloader',
         'mediaOffloadPluginActive' => $mediaPluginActive,
+        'standardPlugins' => $standardPlugins,
         'mediaProvider' => $mediaProvider !== '' ? $mediaProvider : null,
         'mediaBucket' => $mediaBucket !== '' ? $mediaBucket : null,
         'mediaEndpointHost' => $mediaEndpoint !== '' ? wp_parse_url($mediaEndpoint, PHP_URL_HOST) : null,
