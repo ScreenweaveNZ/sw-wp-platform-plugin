@@ -2,7 +2,7 @@
 /**
  * Plugin Name: ScreenWeave Platform
  * Description: ScreenWeave WordPress platform defaults, health checks, and security hardening.
- * Version: 1.2.0
+ * Version: 1.3.0
  * Author: ScreenWeave
  */
 
@@ -12,7 +12,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-const SCREENWEAVE_PLATFORM_VERSION = '1.2.0';
+const SCREENWEAVE_PLATFORM_VERSION = '1.3.0';
 const SCREENWEAVE_PLATFORM_NAME = 'screenweave-wordpress';
 
 /**
@@ -46,6 +46,86 @@ function screenweave_is_non_production_or_holding(): bool
 
     return $environment !== 'production' || screenweave_env_bool('WORDPRESS_IS_HOLDING_URL', false);
 }
+
+function screenweave_media_provider(): string
+{
+    $provider = screenweave_env_string('ADVMO_MEDIA_PROVIDER');
+
+    if (in_array($provider, ['cloudflare_r2', 'minio'], true)) {
+        return $provider;
+    }
+
+    if (screenweave_env_string('ADVMO_CLOUDFLARE_R2_BUCKET') !== '') {
+        return 'cloudflare_r2';
+    }
+
+    if (screenweave_env_string('ADVMO_MINIO_BUCKET') !== '') {
+        return 'minio';
+    }
+
+    return '';
+}
+
+function screenweave_media_bucket(string $provider): string
+{
+    if ($provider === 'cloudflare_r2') {
+        return screenweave_env_string('ADVMO_CLOUDFLARE_R2_BUCKET');
+    }
+
+    if ($provider === 'minio') {
+        return screenweave_env_string('ADVMO_MINIO_BUCKET');
+    }
+
+    return '';
+}
+
+function screenweave_media_endpoint(string $provider): string
+{
+    if ($provider === 'cloudflare_r2') {
+        return screenweave_env_string('ADVMO_CLOUDFLARE_R2_ENDPOINT');
+    }
+
+    if ($provider === 'minio') {
+        return screenweave_env_string('ADVMO_MINIO_ENDPOINT');
+    }
+
+    return '';
+}
+
+function screenweave_media_domain(string $provider): string
+{
+    if ($provider === 'cloudflare_r2') {
+        return screenweave_env_string('ADVMO_CLOUDFLARE_R2_DOMAIN');
+    }
+
+    if ($provider === 'minio') {
+        return screenweave_env_string('ADVMO_MINIO_DOMAIN');
+    }
+
+    return '';
+}
+
+/**
+ * Configure Advanced Media Offloader's provider from environment before normal plugins load.
+ */
+add_action('muplugins_loaded', static function (): void {
+    $provider = screenweave_media_provider();
+
+    if ($provider === '') {
+        return;
+    }
+
+    $settings = get_option('advmo_settings', []);
+
+    if (!is_array($settings)) {
+        $settings = [];
+    }
+
+    if (($settings['cloud_provider'] ?? '') !== $provider) {
+        $settings['cloud_provider'] = $provider;
+        update_option('advmo_settings', $settings, false);
+    }
+});
 
 /**
  * Disable the built-in code editors. This is safe for all environments.
@@ -191,9 +271,16 @@ function screenweave_health_check(): WP_REST_Response
         $cacheStatus = wp_using_ext_object_cache() ? 'enabled' : 'configured-but-not-enabled';
     }
 
-    $mediaBucket = screenweave_env_string('S3_UPLOADS_BUCKET');
-    $mediaEndpoint = screenweave_env_string('S3_UPLOADS_ENDPOINT_URL');
-    $mediaBucketUrl = screenweave_env_string('S3_UPLOADS_BUCKET_URL');
+    $mediaProvider = screenweave_media_provider();
+    $mediaBucket = screenweave_media_bucket($mediaProvider);
+    $mediaEndpoint = screenweave_media_endpoint($mediaProvider);
+    $mediaBucketUrl = screenweave_media_domain($mediaProvider);
+
+    if (!function_exists('is_plugin_active')) {
+        require_once ABSPATH . 'wp-admin/includes/plugin.php';
+    }
+
+    $mediaPluginActive = is_plugin_active('advanced-media-offloader/advanced-media-offloader.php');
 
     $payload = [
         'status' => $statusCode === 200 ? 'ok' : 'degraded',
@@ -215,6 +302,9 @@ function screenweave_health_check(): WP_REST_Response
         'fileModsDisabled' => defined('DISALLOW_FILE_MODS') && DISALLOW_FILE_MODS,
         'mediaStorage' => $mediaBucket !== '' ? 's3-compatible' : 'local',
         'mediaOffloadConfigured' => $mediaBucket !== '',
+        'mediaOffloadPlugin' => 'advanced-media-offloader',
+        'mediaOffloadPluginActive' => $mediaPluginActive,
+        'mediaProvider' => $mediaProvider !== '' ? $mediaProvider : null,
         'mediaBucket' => $mediaBucket !== '' ? $mediaBucket : null,
         'mediaEndpointHost' => $mediaEndpoint !== '' ? wp_parse_url($mediaEndpoint, PHP_URL_HOST) : null,
         'mediaBucketUrlHost' => $mediaBucketUrl !== '' ? wp_parse_url($mediaBucketUrl, PHP_URL_HOST) : null,

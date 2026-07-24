@@ -7,7 +7,7 @@ This plugin is intended to be installed by `sw-wp-site-template` through `platfo
 ## Install manifest entry
 
 ```text
-github|mu-plugin|screenweave-platform|ScreenweaveNZ/sw-wp-platform-plugin|v1.2.0|screenweave-platform.php
+github|mu-plugin|screenweave-platform|ScreenweaveNZ/sw-wp-platform-plugin|refs/tags/v1.3.0|screenweave-platform.php
 ```
 
 Use pinned tags or SHAs for production deployments.
@@ -20,4 +20,4 @@ The public health endpoint is:
 /wp-json/screenweave/v1/health
 ```
 
-It reports non-secret operational metadata used by `sw-wp-ops`, including database reachability, object-cache status, Redis client, SMTP configuration, cron/file-mod settings, staging/noindex status, and whether media is local or S3-compatible.
+It reports non-secret operational metadata used by `sw-wp-ops`, including database reachability, object-cache status, Redis client, SMTP configuration, cron/file-mod settings, staging/noindex status, and whether media is local or S3-compatible via Advanced Media Offloader.
